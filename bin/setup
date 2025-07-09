@@ -1,0 +1,11 @@
+#!/usr/bin/env php
+<?php
+require __DIR__ . '/../vendor/autoload.php';
+
+$config = require __DIR__ . '/../config/config.php';
+$pdo = $config['db'];
+
+$repo = new \AuthKit\UserRepository($pdo);
+$repo->createSchema();
+
+echo "✅ MySQL schema created.\n";
