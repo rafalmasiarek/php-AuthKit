@@ -13,7 +13,7 @@ AuthKit is a lightweight and extensible PHP authentication library supporting:
 ## 🚀 Installation
 
 ```bash
-composer require yourvendor/authkit
+composer require rafalmasiarek/authkit
 ```
 
 Or clone and load via autoloader if not using Composer.
