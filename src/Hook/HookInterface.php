@@ -1,4 +1,5 @@
 <?php
+
 namespace AuthKit\Hook;
 
 use AuthKit\User;
@@ -53,6 +54,12 @@ interface HookInterface
      * Called when logout() is called explicitly.
      */
     public function onLogout(User $user): void;
+
+    /**
+     * Called when sessions are forcibly invalidated by admin or security action.
+     * $count = how many sessions were removed.
+     */
+    public function onLogoutForced(int $userId, ?string $reason, int $count): void;
 
     /**
      * Called after updating user data.
