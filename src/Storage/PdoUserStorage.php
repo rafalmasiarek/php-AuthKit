@@ -134,6 +134,24 @@ class PdoUserStorage implements UserStorageInterface
     }
 
     /**
+     * Delete all session tokens belonging to a specific user.
+     *
+     * This method invalidates all active sessions for the given user ID by
+     * removing corresponding records from the `sessions` table.
+     * Typically used for administrative or security actions (e.g. force logout).
+     *
+     * @param int $userId The ID of the user whose sessions should be deleted.
+     *
+     * @return int The number of sessions that were removed.
+     */
+    public function deleteTokensByUserId(int $userId): int
+    {
+        $stmt = $this->pdo->prepare("DELETE FROM sessions WHERE user_id = :uid");
+        $stmt->execute(['uid' => $userId]);
+        return $stmt->rowCount();
+    }
+
+    /**
      * Update a user's information in the database.
      *
      * @param User $user The user to update.
