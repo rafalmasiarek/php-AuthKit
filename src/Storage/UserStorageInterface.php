@@ -57,6 +57,18 @@ interface UserStorageInterface
     public function deleteToken(string $token): void;
 
     /**
+     * Delete all session tokens for given user id.
+     * Returns number of removed tokens.
+     */
+    public function deleteTokensByUserId(int $userId): int;
+
+    /**
+     * Delete a single token, if you nie masz tej metody
+     * (jeśli już masz, zostaw jak jest).
+     */
+    public function deleteToken(string $token): int;
+
+    /**
      * Create the necessary database schema for user storage.
      *
      * This method should be called to initialize the storage system.

@@ -384,31 +384,19 @@ class Auth
       return null;
     }
 
-    $token = $_SESSION[$this->sessionKey];
-    $record = $this->repo->findByToken($token);
+    $token  = (string) $_SESSION[$this->sessionKey];
+    $user   = $this->repo->findByToken($token);
 
-    if (!$record) {
+    if (!$user) {
+      // Treat as expired/invalid session: cleanup + optional hook
+      unset($_SESSION[$this->sessionKey]);
       if ($this->hook && method_exists($this->hook, 'onLogoutExpired')) {
         $this->hook->onLogoutExpired();
       }
-      unset($_SESSION[$this->sessionKey]);
       return null;
     }
 
-    if (!empty($record['expires_at']) && $this->ttlSeconds > 0) {
-      $expires = strtotime($record['expires_at']);
-      if (time() > $expires) {
-        $this->repo->deleteToken($token);
-        unset($_SESSION[$this->sessionKey]);
-        if ($this->hook && method_exists($this->hook, 'onLogoutExpired')) {
-          $this->hook->onLogoutExpired();
-        }
-        return null;
-      }
-    }
-
-    $user = $this->repo->findById($record['user_id']);
-    if ($user && $this->hook && method_exists($this->hook, 'onUserActive')) {
+    if ($this->hook && method_exists($this->hook, 'onUserActive')) {
       $this->hook->onUserActive($user);
     }
 
@@ -436,6 +424,75 @@ class Auth
     }
 
     unset($_SESSION[$this->sessionKey]);
+  }
+
+  /**
+   * Force-logout: invalidate ALL sessions of the given user (every device).
+   * Accepts User or user id. Returns number of invalidated sessions.
+   */
+  public function forceLogoutUser(User|int $userOrId, ?string $reason = null): int
+  {
+    $userId = $userOrId instanceof User ? (int)$userOrId->get('id') : (int)$userOrId;
+
+    // Storage-level revoke
+    $count = $this->repo->deleteTokensByUserId($userId);
+
+    // If the currently logged-in session belongs to that user — also clear PHP session.
+    $current = $this->getUser();
+    if ($current && (int)$current->get('id') === $userId) {
+      // Optional: call onLogout hook for the *current* device
+      if ($this->hook && method_exists($this->hook, 'onLogout')) {
+        $this->hook->onLogout($current);
+      }
+      unset($_SESSION[$this->sessionKey]);
+    }
+
+    // Optional: admin/audit hook
+    if ($this->hook && method_exists($this->hook, 'onLogoutForced')) {
+      // Call once, not per token
+      // You can pass a lightweight user stub if you don't want another fetch
+      $this->hook->onLogoutForced($userId, $reason, $count);
+    }
+
+    return $count;
+  }
+
+  /**
+   * Force-logout by token (single device/session).
+   * Returns 1 if removed, 0 otherwise.
+   */
+  public function forceLogoutToken(string $token, ?string $reason = null): int
+  {
+    // Best-effort: try to resolve user for hook
+    $user = $this->repo->findByToken($token);
+
+    $removed = $this->repo->deleteToken($token);
+
+    // If we just killed our own current token – clear PHP session
+    if (!empty($_SESSION[$this->sessionKey]) && hash_equals($_SESSION[$this->sessionKey], $token)) {
+      if ($user && $this->hook && method_exists($this->hook, 'onLogout')) {
+        $this->hook->onLogout($user);
+      }
+      unset($_SESSION[$this->sessionKey]);
+    }
+
+    if ($user && $this->hook && method_exists($this->hook, 'onLogoutForced')) {
+      $this->hook->onLogoutForced((int)$user->get('id'), $reason, $removed);
+    }
+
+    return $removed;
+  }
+
+  /**
+   * Convenience: force-logout by email (all sessions).
+   */
+  public function forceLogoutEmail(string $email, ?string $reason = null): int
+  {
+    $user = $this->repo->findByEmail($email);
+    if (!$user) {
+      return 0;
+    }
+    return $this->forceLogoutUser($user, $reason);
   }
 
   /**
