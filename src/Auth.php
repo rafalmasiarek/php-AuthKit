@@ -466,7 +466,7 @@ class Auth
     // Best-effort: try to resolve user for hook
     $user = $this->repo->findByToken($token);
 
-    $removed = $this->repo->deleteToken($token);
+    $removed = (int) $this->repo->deleteToken($token);
 
     // If we just killed our own current token – clear PHP session
     if (!empty($_SESSION[$this->sessionKey]) && hash_equals($_SESSION[$this->sessionKey], $token)) {

@@ -126,11 +126,13 @@ class PdoUserStorage implements UserStorageInterface
      * Delete a session token from the database.
      *
      * @param string $token The session token to delete.
+     * @return int The number of tokens that were deleted (mostly 0/1).
      */
-    public function deleteToken(string $token): void
+    public function deleteToken(string $token): int
     {
         $stmt = $this->pdo->prepare("DELETE FROM sessions WHERE token = :token");
         $stmt->execute(['token' => $token]);
+        return $stmt->rowCount();
     }
 
     /**

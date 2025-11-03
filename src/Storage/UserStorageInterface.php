@@ -53,12 +53,13 @@ interface UserStorageInterface
      * Delete a session token.
      *
      * @param string $token The session token to delete.
+     * @return int The number of tokens that were deleted (mostly 0/1).
      */
-    public function deleteToken(string $token): void;
+    public function deleteToken(string $token): int;
 
     /**
      * Delete all session tokens for given user id.
-     * Returns number of removed tokens.
+     * @return int number of removed tokens.
      */
     public function deleteTokensByUserId(int $userId): int;
 
