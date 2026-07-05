@@ -23,11 +23,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'login') {
         $email = trim((string)($_POST['email'] ?? ''));
         $pass = (string)($_POST['password'] ?? '');
-        $token = $auth->login($email, $pass);
-        if ($token) {
+        $login = $auth->login($email, $pass);
+        if ($login->isSuccess()) {
             redirect('account.php');
         } else {
-            $error = "Invalid credentials.";
+            $error = $login->message();
         }
     }
 }

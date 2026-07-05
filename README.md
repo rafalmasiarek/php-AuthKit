@@ -1,204 +1,239 @@
 # AuthKit
 
-AuthKit is a lightweight, extensible PHP authentication library with:
+Lightweight, extensible PHP 8.1+ authentication library.
 
 - Registration & login with secure password hashing
-- Server-side **session tokens** (UUID) stored in DB with optional **TTL**
-- Pluggable storage backend (**PDO** reference implementation)
-- Optional **hooks** for policy & audit (rate-limit, IP checks, logging, etc.)
-- Flexible user model (`User::get($fields)` / `User::getAll()`); helpers `getId()`, `getEmail()`
-- Admin features: **force logout** by user/token/email
+- Server-side session tokens stored in DB with optional TTL
+- Pluggable **login extension pipeline** — deny or challenge after credentials pass
+- Multi-step **challenge flows** (MFA, email activation, device check, etc.)
+- Pluggable **credential provider** — local PDO default, Cognito/Keycloak as external packages
+- Pluggable **password hasher** — `NativePasswordHasher` default
+- Pluggable **token transport** — PHP session (web) or Bearer header (API)
+- Pluggable **user ID policy** — auto-increment default, UUID in your app
+- Optional **hooks** for audit and policy (rate-limit, IP checks, logging)
+- Admin features: force logout by user / token / email
 
-> Designed for apps using Slim/Laminas/Symfony or plain PHP. Works with SQLite and MySQL.
+> Works with MySQL/MariaDB and SQLite. Designed for Slim, Laminas, Symfony or plain PHP.
 
 ---
 
-## 🚀 Installation
+## Installation
 
 ```bash
 composer require rafalmasiarek/authkit
 ```
 
-Your `composer.json` should map:
-
-```json
-{
-  "autoload": {
-    "psr-4": {
-      "AuthKit\\": "src/"
-    }
-  }
-}
-```
-
-Then:
-
-```bash
-composer dump-autoload -o
-```
-
 ---
 
-## 💾 Storage Model (Users & Sessions)
-
-AuthKit separates **users** from **sessions**. After a successful login, a random **UUID v4 token** is generated and stored in the `sessions` table. The token may have an **expiration** (`expires_at`, optional). The token is also saved in `$_SESSION[$sessionKey]` (default `auth_token`) to reference the DB session.
-
-### Tables
-
-- `users` — app user records (email, password hash, flags, custom fields)
-- `sessions` — active logins (user_id, token, created_at, expires_at, optional IP/UA)
-
-You’ll need both tables.
-
----
-
-### SQLite DDL
-
-```sql
-PRAGMA foreign_keys = ON;
-
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    name TEXT NULL,
-    active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TRIGGER IF NOT EXISTS users_updated_at
-AFTER UPDATE ON users
-BEGIN
-    UPDATE users SET updated_at = datetime('now') WHERE id = NEW.id;
-END;
-
-CREATE TABLE IF NOT EXISTS sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    token TEXT NOT NULL UNIQUE,        -- UUID v4
-    ip TEXT NULL,
-    user_agent TEXT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    expires_at TEXT NULL,              -- NULL = no expiry
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
-```
-
----
-
-### MySQL DDL
-
-```sql
-CREATE TABLE IF NOT EXISTS users (
-  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  email VARCHAR(254) NOT NULL UNIQUE,
-  password_hash VARCHAR(255) NOT NULL,
-  name VARCHAR(190) NULL,
-  active TINYINT(1) NOT NULL DEFAULT 1,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS sessions (
-  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id INT UNSIGNED NOT NULL,
-  token CHAR(36) NOT NULL UNIQUE,          -- UUID v4
-  ip VARCHAR(45) NULL,                     -- IPv4/IPv6
-  user_agent TEXT NULL,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  expires_at DATETIME NULL,
-  CONSTRAINT fk_sessions_user
-    FOREIGN KEY (user_id) REFERENCES users(id)
-    ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE INDEX idx_sessions_user_id ON sessions(user_id);
-CREATE INDEX idx_sessions_expires_at ON sessions(expires_at);
-```
-
----
-
-## 🧩 Storage Contract (PDO reference)
-
-```php
-interface UserStorageInterface {
-    public function findByEmail(string $email): ?\AuthKit\User;
-    public function findByToken(string $token): ?\AuthKit\User;
-    public function createUser(string $email, string $passwordHash, array $fields = []): \AuthKit\User;
-    public function updateUser(\AuthKit\User $user, array $updates): \AuthKit\User;
-
-    public function storeToken(\AuthKit\User $user, string $token, ?DateTime $expiresAt): void;
-    public function deleteToken(string $token): int;
-
-    public function deleteTokensByUserId(int $userId): int;
-    // Optional: delete all except current
-    // public function deleteTokensByUserIdExcept(int $userId, string $exceptToken): int;
-}
-```
-
----
-
-## 🔧 Bootstrapping
+## Quick start
 
 ```php
 use AuthKit\Auth;
 use AuthKit\Storage\PdoUserStorage;
 
-$pdo = new PDO('sqlite:/path/to/authkit.sqlite');
+$pdo     = new PDO('sqlite:/path/to/auth.sqlite');
 $storage = new PdoUserStorage($pdo);
+$storage->createSchema(); // creates users + sessions tables
 
-// TTL semantics: 3600 = 1 hour; 0 = no expiry
-$auth = new Auth($storage, hook: null, ttlSeconds: 3600);
+$auth = new Auth($storage);
 
-// Optionally:
-$auth->setSessionKey('auth_token');
-$auth->setThrowExceptions(false);
+// Register
+$user = $auth->register('user@example.com', 'secret123');
+
+// Login
+$login = $auth->login('user@example.com', 'secret123');
+
+if ($login->isSuccess()) {
+    // session stored automatically — redirect to dashboard
+}
+
+if ($login->isFailure()) {
+    echo $login->message(); // "Invalid credentials."
+}
+
+// Current user (reads from session)
+$user = $auth->getUser(); // ?User
+
+// Logout
+$auth->logout();
 ```
 
 ---
 
-## 🧠 API
-
-### Register
+## Constructor
 
 ```php
-register(string $email, string $password, array $customFields = [], array $additionalChecks = []): User|string|null
-```
-
-### Login
-
-```php
-login(string $email, string $password, array $additionalChecks = []): ?string
-```
-
-### Current User
-
-```php
-getUser(): ?User
-isLoggedIn(): bool
-```
-
-### Logout
-
-```php
-logout(): void
-```
-
-### Force Logout
-
-```php
-forceLogoutUser(User|int $userOrId, ?string $reason = null): int
-forceLogoutEmail(string $email, ?string $reason = null): int
-forceLogoutToken(string $token, ?string $reason = null): int
+new Auth(
+    storage:          $storage,           // UserStorageInterface — required
+    hook:             null,               // HookInterface|null
+    ttlSeconds:       3600,               // int — 0 = no expiry
+    messages:         null,               // MessageProviderInterface|null
+    throwExceptions:  false,              // bool — throw AuthException on errors
+    hasher:           null,               // PasswordHasherInterface|null — default: NativePasswordHasher
+    credentials:      null,               // CredentialProviderInterface|null — default: PdoCredentialProvider
+    challengeStorage: null,               // ChallengeStorageInterface|null — required for challenge flows
+    transport:        null,               // TokenTransportInterface|null — default: PhpSessionTransport
+)
 ```
 
 ---
 
-## 🪝 Hooks
+## Login result
+
+`login()` returns a `Login` object — never throws by default.
+
+```php
+$login = $auth->login($email, $password);
+
+$login->isSuccess();        // bool
+$login->isFailure();        // bool
+$login->requiresChallenge(); // bool — set when an extension requires an extra step
+
+$login->token();            // ?string — session token on success
+$login->user();             // ?User   — on success or challenge
+$login->message();          // string  — failure reason
+$login->challengeToken();   // ?string — raw token for completeChallenge()
+$login->challengeType();    // ?string — e.g. 'mfa_totp', 'email_activation'
+```
+
+With `throwExceptions: true` — failure throws `AuthException` instead.
+
+---
+
+## Login extension pipeline
+
+Extensions run after credentials are verified. Register them with `addLoginExtension()`.
+The first deny or challenge decision terminates the pipeline.
+
+```php
+use AuthKit\Extension\LoginExtensionInterface;
+use AuthKit\LoginContext;
+use AuthKit\LoginDecision;
+
+class ActiveUserExtension implements LoginExtensionInterface
+{
+    public function decide(LoginContext $context): LoginDecision
+    {
+        if (!$context->user->get('active')) {
+            return LoginDecision::deny('Account is not active.');
+        }
+        return LoginDecision::allow();
+    }
+}
+
+$auth->addLoginExtension(new ActiveUserExtension());
+```
+
+`LoginContext` carries `$user`, `$ip`, `$userAgent`, and optional `$meta`.
+
+---
+
+## Challenge flows (MFA, email activation, etc.)
+
+An extension can require a second step instead of immediately allowing or denying.
+
+```php
+use AuthKit\Extension\ChallengeExtensionInterface;
+use AuthKit\Challenge\ChallengeRecord;
+
+class TotpExtension implements ChallengeExtensionInterface
+{
+    public function decide(LoginContext $context): LoginDecision
+    {
+        // trigger challenge — payload stored in ChallengeRecord
+        return LoginDecision::challenge('mfa_totp', [
+            'secret' => $context->user->get('totp_secret'),
+        ]);
+    }
+
+    public function supportsChallenge(string $type): bool
+    {
+        return $type === 'mfa_totp';
+    }
+
+    public function completeChallenge(ChallengeRecord $challenge, array $input): LoginDecision
+    {
+        $valid = verify_totp($challenge->payload['secret'], $input['code'] ?? '');
+        return $valid ? LoginDecision::allow() : LoginDecision::deny('Invalid code.');
+    }
+}
+```
+
+**Flow:**
+
+```php
+// Step 1 — login
+$login = $auth->login($email, $password);
+
+if ($login->requiresChallenge()) {
+    $_SESSION['challenge_token'] = $login->challengeToken();
+    // redirect to /login/mfa — type is $login->challengeType()
+}
+
+// Step 2 — verify code
+$login = $auth->completeChallenge($_SESSION['challenge_token'], ['code' => $input['code']]);
+
+if ($login->isSuccess()) {
+    // session created — redirect to dashboard
+}
+```
+
+Challenge storage must be provided:
+
+```php
+use AuthKit\Challenge\PdoChallengeStorage;
+
+$auth = new Auth($storage, challengeStorage: new PdoChallengeStorage($pdo));
+```
+
+Schema: `(new PdoChallengeStorage($pdo))->createSchema();`
+
+---
+
+## Token transport
+
+Controls how the active token is stored and read on the client side.
+
+### Web (default — PHP session)
+
+```php
+use AuthKit\Transport\PhpSessionTransport;
+
+$auth = new Auth($storage); // PhpSessionTransport('auth_token') used by default
+
+// Custom session key:
+$auth = new Auth($storage, transport: new PhpSessionTransport('my_session_key'));
+```
+
+### API (Bearer header)
+
+```php
+use AuthKit\Transport\BearerHeaderTransport;
+
+$auth = new Auth($storage, transport: new BearerHeaderTransport());
+
+// Login — return token to client in JSON
+$login = $auth->login($email, $password);
+// → ['token' => $login->token()]
+
+// Subsequent requests — client sends Authorization: Bearer <token>
+$user = $auth->getUser(); // reads from header automatically
+```
+
+---
+
+## Storage schema
+
+`PdoUserStorage::createSchema()` creates the `users` and `sessions` tables.
+`PdoChallengeStorage::createSchema()` creates `auth_challenges` (only needed for challenge flows).
+
+Both support MySQL/MariaDB and SQLite.
+
+---
+
+## Hooks
+
+All hook methods are optional — implement only what you need.
 
 ```php
 interface HookInterface {
@@ -208,40 +243,26 @@ interface HookInterface {
 
     public function onBeforeLogin(User $user): true|string;
     public function onLoginSuccess(User $user): void;
-    public function onLoginFailure(string $email, \AuthKit\Exception\AuthException $e): void;
+    public function onLoginFailure(string $email, AuthException $e): void;
 
     public function onLogout(User $user): void;
     public function onLogoutExpired(): void;
     public function onUserActive(User $user): void;
     public function onUserUpdated(User $user, array $changedFields): void;
 
-    public function onLogoutForced(int $userId, ?string $reason, int $count): void;
+    public function onLogoutForced(int|string $userId, ?string $reason, int $count): void;
 }
 ```
 
 ---
 
-## 📦 Examples
+## Force logout
 
-A runnable demo with SQLite forms is under `examples/sqlite-forms`:
-
+```php
+$auth->forceLogoutUser($userOrId);        // all sessions for a user
+$auth->forceLogoutEmail($email);          // all sessions by email
+$auth->forceLogoutToken($token);          // single session by token
 ```
-examples/sqlite-forms/
-├── bootstrap.php
-├── schema.sql
-├── index.php
-├── account.php
-├── logout.php
-└── admin.php
-```
-
-Run:
-
-```bash
-php -S 127.0.0.1:8080 -t examples/sqlite-forms
-```
-
-The example will create `authkit.sqlite` on first run.
 
 ---
 
