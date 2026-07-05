@@ -6,6 +6,8 @@ namespace AuthKit;
 
 use AuthKit\Challenge\ChallengeRecord;
 use AuthKit\Challenge\ChallengeStorageInterface;
+use AuthKit\Clock\ClockInterface;
+use AuthKit\Clock\SystemClock;
 use AuthKit\Credential\CredentialProviderInterface;
 use AuthKit\Credential\PdoCredentialProvider;
 use AuthKit\Exception\AuthException;
@@ -20,7 +22,6 @@ use AuthKit\Storage\UserStorageInterface;
 use AuthKit\Transport\PhpSessionTransport;
 use AuthKit\Transport\TokenTransportInterface;
 use DateInterval;
-use DateTime;
 
 /**
  * Core authentication facade.
@@ -58,6 +59,11 @@ final class Auth
     private TokenTransportInterface $transport;
 
     /**
+     * @var ClockInterface Used for session and challenge expiry calculations.
+     */
+    private ClockInterface $clock;
+
+    /**
      * @var array<LoginExtensionInterface> Evaluated in order after credentials pass.
      */
     private array $loginExtensions = [];
@@ -72,6 +78,8 @@ final class Auth
      * @param CredentialProviderInterface|null $credentials      Credential verifier for login() (default: PdoCredentialProvider).
      * @param ChallengeStorageInterface|null   $challengeStorage Required only when using challenge extensions.
      * @param TokenTransportInterface|null     $transport        Token read/write transport (default: PhpSessionTransport).
+     * @param ClockInterface|null              $clock            Custom clock (takes precedence over $timezone when provided).
+     * @param string                           $timezone         Timezone for the built-in SystemClock (e.g. 'Europe/Warsaw'). Ignored when $clock is provided. Defaults to UTC.
      */
     public function __construct(
         private readonly UserStorageInterface       $storage,
@@ -83,12 +91,15 @@ final class Auth
         ?CredentialProviderInterface                $credentials      = null,
         private readonly ?ChallengeStorageInterface $challengeStorage = null,
         ?TokenTransportInterface                    $transport        = null,
+        ?ClockInterface                             $clock            = null,
+        string                                      $timezone         = 'UTC',
     ) {
         $this->messages        = $messages ?? new DefaultMessageProvider();
         $this->throwExceptions = $throwExceptions;
         $this->hasher          = $hasher ?? new NativePasswordHasher();
         $this->credentials     = $credentials ?? new PdoCredentialProvider($storage, $this->hasher);
         $this->transport       = $transport ?? new PhpSessionTransport();
+        $this->clock           = $clock ?? new SystemClock($timezone);
         $this->transport->initialize();
     }
 
@@ -176,7 +187,15 @@ final class Auth
      */
     public function login(string $email, string $password): Login
     {
-        $result = $this->credentials->verify(['email' => $email, 'password' => $password]);
+        $credentialContext = [
+            'ip'         => $_SERVER['REMOTE_ADDR'] ?? '',
+            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? '',
+        ];
+
+        $result = $this->credentials->verify(
+            ['email' => $email, 'password' => $password],
+            $credentialContext,
+        );
 
         if (!$result->isSuccess()) {
             $this->callHook('onLoginFailure', $email, new AuthException($result->message()));
@@ -185,9 +204,10 @@ final class Auth
 
         $user    = $result->user();
         $context = new LoginContext(
-            user:      $user,
-            ip:        $_SERVER['REMOTE_ADDR'] ?? '',
-            userAgent: $_SERVER['HTTP_USER_AGENT'] ?? '',
+            user:           $user,
+            ip:             $credentialContext['ip'],
+            userAgent:      $credentialContext['user_agent'],
+            credentialMeta: $result->meta(),
         );
 
         $beforeResult = $this->callHookResult('onBeforeLogin', $user);
@@ -246,12 +266,15 @@ final class Auth
 
         $decision = $extension->completeChallenge($challenge, $input);
 
-        if ($decision->isDeny()) {
+        if (!$decision->isAllow()) {
             $this->challengeStorage->incrementAttempts($challenge);
-            return $this->loginFailure($decision->reason() ?? $this->messages->invalidCredentials());
+            $message = $decision->isDeny()
+                ? ($decision->reason() ?? $this->messages->invalidCredentials())
+                : $this->messages->invalidCredentials();
+            return $this->loginFailure($message);
         }
 
-        $this->challengeStorage->complete($challenge);
+        $this->challengeStorage->complete($challenge, $this->clock->now());
 
         $user = $this->storage->findById($challenge->userId);
         if ($user === null) {
@@ -284,7 +307,7 @@ final class Auth
             return null;
         }
 
-        $user = $this->storage->findByToken($token);
+        $user = $this->storage->findByToken($token, $this->clock->now());
 
         if ($user === null) {
             $this->transport->clear();
@@ -411,7 +434,7 @@ final class Auth
     {
         $token     = bin2hex(random_bytes(32));
         $expiresAt = $this->ttlSeconds > 0
-            ? (new DateTime())->add(new DateInterval("PT{$this->ttlSeconds}S"))
+            ? $this->clock->now()->add(new DateInterval("PT{$this->ttlSeconds}S"))
             : null;
 
         $this->storage->storeToken($user, $token, $expiresAt);
@@ -437,23 +460,29 @@ final class Auth
             throw new \RuntimeException('A ChallengeStorageInterface must be provided to use challenge flows.');
         }
 
-        $rawToken = bin2hex(random_bytes(32));
-        $type     = (string) $decision->challengeType();
+        $rawToken        = bin2hex(random_bytes(32));
+        $type            = (string) $decision->challengeType();
+        $expiresAtSource = $decision->challengeExpiresAt();
+        $expiresAt       = $expiresAtSource !== null
+            ? \DateTime::createFromInterface($expiresAtSource)
+            : \DateTime::createFromInterface($this->clock->now()->add(new DateInterval('PT15M')));
 
         $record = new ChallengeRecord(
             id:          bin2hex(random_bytes(16)),
             userId:      $user->getId() ?? '',
             type:        $type,
             payload:     $decision->challengePayload(),
-            maxAttempts: 5,
-            expiresAt:   (new DateTime())->add(new DateInterval('PT15M')),
+            maxAttempts: $decision->challengeMaxAttempts() ?? 5,
+            expiresAt:   $expiresAt,
             ip:          $context->ip,
             userAgent:   $context->userAgent,
         );
 
         $this->challengeStorage->store($record, $rawToken);
 
-        return Login::challengeRequired($rawToken, $type, $user);
+        $message = $decision->challengeMessage();
+
+        return Login::challengeRequired($rawToken, $type, $user, $message);
     }
 
     /**

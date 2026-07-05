@@ -68,11 +68,11 @@ final class PdoChallengeStorage implements ChallengeStorageInterface
     /**
      * @inheritDoc
      */
-    public function complete(ChallengeRecord $record): void
+    public function complete(ChallengeRecord $record, \DateTimeImmutable $now): void
     {
         $this->pdo->prepare(
             'UPDATE auth_challenges SET completed_at = ? WHERE id = ?'
-        )->execute([(new DateTime())->format('Y-m-d H:i:s'), $record->id]);
+        )->execute([$now->format('Y-m-d H:i:s'), $record->id]);
     }
 
     /**
@@ -88,11 +88,11 @@ final class PdoChallengeStorage implements ChallengeStorageInterface
     /**
      * @inheritDoc
      */
-    public function purgeExpired(): void
+    public function purgeExpired(\DateTimeImmutable $now): void
     {
         $this->pdo->prepare(
             'DELETE FROM auth_challenges WHERE expires_at < ?'
-        )->execute([(new DateTime())->format('Y-m-d H:i:s')]);
+        )->execute([$now->format('Y-m-d H:i:s')]);
     }
 
     /**
@@ -120,6 +120,9 @@ final class PdoChallengeStorage implements ChallengeStorageInterface
                     completed_at TEXT    DEFAULT NULL
                 )
             ");
+            $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_challenges_user_id ON auth_challenges (user_id)');
+            $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_challenges_expires ON auth_challenges (expires_at)');
+            $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_challenges_user_type_completed ON auth_challenges (user_id, type, completed_at)');
         } else {
             $this->pdo->exec("
                 CREATE TABLE IF NOT EXISTS auth_challenges (
@@ -138,7 +141,8 @@ final class PdoChallengeStorage implements ChallengeStorageInterface
                     PRIMARY KEY  (id),
                     UNIQUE KEY   uq_token_hash (token_hash),
                     INDEX        idx_user_id   (user_id),
-                    INDEX        idx_expires   (expires_at)
+                    INDEX        idx_expires   (expires_at),
+                    INDEX        idx_user_type_completed (user_id, type, completed_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             ");
         }
@@ -162,7 +166,7 @@ final class PdoChallengeStorage implements ChallengeStorageInterface
             ip:          (string) $row['ip'],
             userAgent:   (string) $row['user_agent'],
             attempts:    (int)    $row['attempts'],
-            completedAt: isset($row['completed_at']) ? new DateTime((string) $row['completed_at']) : null,
+            completedAt: !empty($row['completed_at']) ? new DateTime((string) $row['completed_at']) : null,
         );
     }
 }

@@ -24,10 +24,15 @@ interface UserStorageInterface
     /**
      * Find a user by their session token.
      *
-     * @param  string $token The session token to search for.
+     * $now is used to filter out expired sessions at the query level.
+     * Pass the current time from your clock to ensure timezone-consistent
+     * expiry comparisons against the stored expires_at column.
+     *
+     * @param  string            $token The session token to search for.
+     * @param  \DateTimeImmutable $now   Current time used to filter expired sessions.
      * @return User|null
      */
-    public function findByToken(string $token): ?User;
+    public function findByToken(string $token, \DateTimeImmutable $now): ?User;
 
     /**
      * Find a user by their ID.
@@ -59,12 +64,12 @@ interface UserStorageInterface
     /**
      * Store a session token for a user.
      *
-     * @param  User           $user      The user to associate the token with.
-     * @param  string         $token     The session token to store.
-     * @param  \DateTime|null $expiresAt Optional expiration date/time.
+     * @param  User                   $user      The user to associate the token with.
+     * @param  string                 $token     The session token to store.
+     * @param  \DateTimeInterface|null $expiresAt Optional expiration date/time.
      * @return void
      */
-    public function storeToken(User $user, string $token, ?\DateTime $expiresAt): void;
+    public function storeToken(User $user, string $token, ?\DateTimeInterface $expiresAt): void;
 
     /**
      * Delete a single session token.

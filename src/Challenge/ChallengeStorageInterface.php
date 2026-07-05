@@ -34,10 +34,15 @@ interface ChallengeStorageInterface
     /**
      * Mark a challenge as successfully completed.
      *
-     * @param  ChallengeRecord $record
+     * The implementation must record $now as the completion timestamp.
+     * Pass Auth::now() or an equivalent value from your clock to keep
+     * timestamps consistent with the rest of the auth layer.
+     *
+     * @param  ChallengeRecord    $record Challenge to mark as completed.
+     * @param  \DateTimeImmutable $now    Current time used as the completed_at timestamp.
      * @return void
      */
-    public function complete(ChallengeRecord $record): void;
+    public function complete(ChallengeRecord $record, \DateTimeImmutable $now): void;
 
     /**
      * Increment the failed attempt counter for a challenge.
@@ -50,9 +55,13 @@ interface ChallengeStorageInterface
     /**
      * Delete all expired challenge records.
      *
+     * The caller is responsible for supplying the reference time.
+     * Typically called from a maintenance job or cron — not part of the login flow.
+     *
+     * @param  \DateTimeImmutable $now Records with expires_at before this value will be deleted.
      * @return void
      */
-    public function purgeExpired(): void;
+    public function purgeExpired(\DateTimeImmutable $now): void;
 
     /**
      * Create the auth_challenges table if it does not exist.

@@ -31,8 +31,9 @@ final class PdoCredentialProvider implements CredentialProviderInterface
      * @inheritDoc
      *
      * @param array{email: string, password: string} $credentials
+     * @param array<string, mixed>                   $context     Unused by this provider; available for logging or rate-limiting in custom implementations.
      */
-    public function verify(array $credentials): CredentialResult
+    public function verify(array $credentials, array $context = []): CredentialResult
     {
         $email    = (string) ($credentials['email'] ?? '');
         $password = (string) ($credentials['password'] ?? '');
@@ -43,7 +44,11 @@ final class PdoCredentialProvider implements CredentialProviderInterface
             return CredentialResult::failure('Invalid credentials.');
         }
 
-        $hash = (string) $user->get('password_hash');
+        $hash = $user->get('password_hash');
+
+        if (!is_string($hash) || $hash === '') {
+            return CredentialResult::failure('Local password login is disabled for this account.');
+        }
 
         if (!$this->hasher->verify($password, $hash)) {
             return CredentialResult::failure('Invalid credentials.');
@@ -55,6 +60,6 @@ final class PdoCredentialProvider implements CredentialProviderInterface
             ]);
         }
 
-        return CredentialResult::success($user);
+        return CredentialResult::success($user, ['provider' => 'local', 'method' => 'password']);
     }
 }

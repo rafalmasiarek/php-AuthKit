@@ -7,7 +7,6 @@ namespace AuthKit\Storage;
 use AuthKit\User;
 use AuthKit\UserId\NullUserIdPolicy;
 use AuthKit\UserId\UserIdPolicyInterface;
-use DateTime;
 use PDO;
 
 /**
@@ -22,7 +21,7 @@ final class PdoUserStorage implements UserStorageInterface
      * @param UserIdPolicyInterface $userIdPolicy ID generation policy (default: database auto-increment).
      */
     public function __construct(
-        private readonly PDO                  $pdo,
+        private readonly PDO                   $pdo,
         private readonly UserIdPolicyInterface $userIdPolicy = new NullUserIdPolicy(),
     ) {
     }
@@ -42,7 +41,7 @@ final class PdoUserStorage implements UserStorageInterface
     /**
      * @inheritDoc
      */
-    public function findByToken(string $token): ?User
+    public function findByToken(string $token, \DateTimeImmutable $now): ?User
     {
         $stmt = $this->pdo->prepare('
             SELECT u.* FROM users u
@@ -53,7 +52,7 @@ final class PdoUserStorage implements UserStorageInterface
         ');
         $stmt->execute([
             'token' => $token,
-            'now'   => (new DateTime())->format('Y-m-d H:i:s'),
+            'now'   => $now->format('Y-m-d H:i:s'),
         ]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -126,7 +125,7 @@ final class PdoUserStorage implements UserStorageInterface
     /**
      * @inheritDoc
      */
-    public function storeToken(User $user, string $token, ?\DateTime $expiresAt): void
+    public function storeToken(User $user, string $token, ?\DateTimeInterface $expiresAt): void
     {
         $stmt = $this->pdo->prepare(
             'INSERT INTO sessions (user_id, token, expires_at) VALUES (:uid, :token, :exp)'
@@ -163,13 +162,18 @@ final class PdoUserStorage implements UserStorageInterface
     /**
      * Delete all expired session tokens.
      *
+     * Typically called from a maintenance job or cron — not part of the login flow.
+     * The caller is responsible for supplying the reference time to ensure
+     * timezone-consistent comparisons against the stored expires_at column.
+     *
+     * @param  \DateTimeImmutable $now Sessions with expires_at before this value will be deleted.
      * @return void
      */
-    public function purgeExpiredTokens(): void
+    public function purgeExpiredTokens(\DateTimeImmutable $now): void
     {
         $this->pdo->prepare(
             'DELETE FROM sessions WHERE expires_at IS NOT NULL AND expires_at < :now'
-        )->execute(['now' => (new DateTime())->format('Y-m-d H:i:s')]);
+        )->execute(['now' => $now->format('Y-m-d H:i:s')]);
     }
 
     /**
@@ -185,7 +189,7 @@ final class PdoUserStorage implements UserStorageInterface
                 CREATE TABLE IF NOT EXISTS users (
                     id            INTEGER PRIMARY KEY AUTOINCREMENT,
                     email         TEXT    NOT NULL UNIQUE,
-                    password_hash TEXT    NOT NULL,
+                    password_hash TEXT    NULL,
                     active        INTEGER NOT NULL DEFAULT 0
                 )
             ");
@@ -203,7 +207,7 @@ final class PdoUserStorage implements UserStorageInterface
                 CREATE TABLE IF NOT EXISTS users (
                     id            INT          NOT NULL AUTO_INCREMENT,
                     email         VARCHAR(255) NOT NULL,
-                    password_hash VARCHAR(255) NOT NULL,
+                    password_hash VARCHAR(255) NULL,
                     active        TINYINT      NOT NULL DEFAULT 0,
                     PRIMARY KEY (id),
                     UNIQUE KEY uq_email (email)

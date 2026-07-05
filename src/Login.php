@@ -83,17 +83,18 @@ final class Login
      * Credentials were verified but an extension blocked session creation
      * pending an additional step. No session exists at this point.
      *
-     * @param string $challengeToken Raw token to pass to Auth::completeChallenge().
-     *                               Store on the caller side (e.g. $_SESSION['authkit_challenge']).
-     * @param string $challengeType  Extension-defined type identifier (e.g. 'mfa_totp', 'email_activation').
-     * @param User   $user           Pre-session user — credentials verified, no session yet.
+     * @param string      $challengeToken Raw token to pass to Auth::completeChallenge().
+     *                                    Store on the caller side (e.g. $_SESSION['authkit_challenge']).
+     * @param string      $challengeType  Extension-defined type identifier (e.g. 'mfa_totp', 'email_activation').
+     * @param User        $user           Pre-session user — credentials verified, no session yet.
+     * @param string|null $message        Optional informational message (e.g. 'A code was sent to your email.').
      * @return self
      */
-    public static function challengeRequired(string $challengeToken, string $challengeType, User $user): self
+    public static function challengeRequired(string $challengeToken, string $challengeType, User $user, ?string $message = null): self
     {
         return new self(
             status:         self::STATUS_CHALLENGE,
-            message:        '',
+            message:        $message ?? '',
             user:           $user,
             challengeToken: $challengeToken,
             challengeType:  $challengeType,

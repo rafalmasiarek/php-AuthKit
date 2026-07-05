@@ -222,6 +222,37 @@ $user = $auth->getUser(); // reads from header automatically
 
 ---
 
+## External credential providers
+
+AuthKit core authenticates into a local `User` object. External providers such as Cognito, Keycloak, Authentik or Zitadel should map their external identity to a local user inside their own `CredentialProviderInterface` implementation.
+
+A credential provider may pass non-persistent login metadata through `CredentialResult::success($user, $meta)`. This metadata is available in login extensions through `LoginContext::credential()`.
+
+```php
+// Inside a custom CognitoCredentialProvider::verify():
+return CredentialResult::success($localUser, [
+    'provider'       => 'cognito',
+    'subject'        => $claims['sub'],
+    'groups'         => $claims['cognito:groups'] ?? [],
+    'email_verified' => $claims['email_verified'] ?? false,
+]);
+
+// Inside a login extension:
+public function decide(LoginContext $ctx): LoginDecision
+{
+    if ($ctx->credential('email_verified') === false) {
+        return LoginDecision::deny('Email address is not verified.');
+    }
+    return LoginDecision::allow();
+}
+```
+
+Users authenticated via an external provider have no local password — `password_hash` is `NULL` in the database. `PdoCredentialProvider` explicitly rejects login attempts for such accounts.
+
+This keeps AuthKit core storage-agnostic and avoids forcing external identity tables into the base package.
+
+---
+
 ## Storage schema
 
 `PdoUserStorage::createSchema()` creates the `users` and `sessions` tables.

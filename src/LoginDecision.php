@@ -21,10 +21,13 @@ final class LoginDecision
     private const CHALLENGE = 'challenge';
 
     private function __construct(
-        private readonly string  $status,
-        private readonly ?string $reason           = null,
-        private readonly ?string $challengeType    = null,
-        private readonly array   $challengePayload = [],
+        private readonly string              $status,
+        private readonly ?string             $reason              = null,
+        private readonly ?string             $challengeType       = null,
+        private readonly array               $challengePayload    = [],
+        private readonly ?string             $challengeMessage    = null,
+        private readonly ?\DateTimeInterface $challengeExpiresAt  = null,
+        private readonly ?int                $challengeMaxAttempts = null,
     ) {
     }
 
@@ -52,14 +55,29 @@ final class LoginDecision
     /**
      * Require an additional verification step before session creation.
      *
-     * @param string               $type    Challenge type handled by a ChallengeExtensionInterface.
-     *                                      Examples: 'mfa_totp', 'email_activation', 'new_device'.
-     * @param array<string, mixed> $payload Data stored with the challenge record (e.g. hashed OTP code).
+     * @param string                   $type        Challenge type handled by a ChallengeExtensionInterface.
+     *                                              Examples: 'mfa_totp', 'email_activation', 'new_device'.
+     * @param array<string, mixed>     $payload     Data stored with the challenge record (e.g. hashed OTP code).
+     * @param string|null              $message     Optional message returned to the caller (e.g. 'A code was sent to your email.').
+     * @param \DateTimeInterface|null  $expiresAt   Override default challenge TTL. Defaults to 15 minutes.
+     * @param int|null                 $maxAttempts Override default max verification attempts. Defaults to 5.
      * @return self
      */
-    public static function challenge(string $type, array $payload = []): self
-    {
-        return new self(self::CHALLENGE, challengeType: $type, challengePayload: $payload);
+    public static function challenge(
+        string              $type,
+        array               $payload     = [],
+        ?string             $message     = null,
+        ?\DateTimeInterface $expiresAt   = null,
+        ?int                $maxAttempts = null,
+    ): self {
+        return new self(
+            self::CHALLENGE,
+            challengeType:        $type,
+            challengePayload:     $payload,
+            challengeMessage:     $message,
+            challengeExpiresAt:   $expiresAt,
+            challengeMaxAttempts: $maxAttempts,
+        );
     }
 
     /**
@@ -108,6 +126,30 @@ final class LoginDecision
     public function challengePayload(): array
     {
         return $this->challengePayload;
+    }
+
+    /**
+     * @return string|null Optional message for the caller when a challenge is required.
+     */
+    public function challengeMessage(): ?string
+    {
+        return $this->challengeMessage;
+    }
+
+    /**
+     * @return \DateTimeInterface|null Custom challenge expiry, or null to use the default (15 minutes).
+     */
+    public function challengeExpiresAt(): ?\DateTimeInterface
+    {
+        return $this->challengeExpiresAt;
+    }
+
+    /**
+     * @return int|null Custom max attempts, or null to use the default (5).
+     */
+    public function challengeMaxAttempts(): ?int
+    {
+        return $this->challengeMaxAttempts;
     }
 
     /**
