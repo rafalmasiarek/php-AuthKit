@@ -373,7 +373,7 @@ final class Auth
      */
     public function forceLogoutToken(string $token, ?string $reason = null): int
     {
-        $user    = $this->storage->findByToken($token);
+        $user    = $this->storage->findByToken($token, $this->clock->now());
         $removed = $this->storage->deleteToken($token);
 
         $current = $this->transport->get();

@@ -73,7 +73,29 @@ new Auth(
     credentials:      null,               // CredentialProviderInterface|null — default: PdoCredentialProvider
     challengeStorage: null,               // ChallengeStorageInterface|null — required for challenge flows
     transport:        null,               // TokenTransportInterface|null — default: PhpSessionTransport
+    clock:            null,               // ClockInterface|null — custom clock; takes precedence over timezone
+    timezone:         'UTC',             // string — timezone for built-in SystemClock; ignored when clock is provided
 )
+```
+
+### Clock and timezone
+
+By default Auth uses UTC for all session and challenge expiry calculations.
+
+```php
+// Use a specific timezone with the built-in clock:
+new Auth($storage, timezone: 'Europe/Warsaw');
+
+// Inject a custom ClockInterface implementation (clock takes precedence over timezone):
+new Auth($storage, clock: $appClock);
+```
+
+`purgeExpiredTokens()` and `purgeExpired()` are maintenance operations called outside the login flow.
+They require an explicit `DateTimeImmutable $now` from the caller:
+
+```php
+$storage->purgeExpiredTokens(new \DateTimeImmutable());
+$challengeStorage->purgeExpired(new \DateTimeImmutable());
 ```
 
 ---
@@ -124,7 +146,8 @@ class ActiveUserExtension implements LoginExtensionInterface
 $auth->addLoginExtension(new ActiveUserExtension());
 ```
 
-`LoginContext` carries `$user`, `$ip`, `$userAgent`, and optional `$meta`.
+`LoginContext` carries `$user`, `$ip`, `$userAgent`, and `$credentialMeta` from the credential provider.
+Use `$context->credential('key')` to read individual metadata values.
 
 ---
 
@@ -260,6 +283,25 @@ This keeps AuthKit core storage-agnostic and avoids forcing external identity ta
 
 Both support MySQL/MariaDB and SQLite.
 
+### User ID policy
+
+`UserIdPolicyInterface` controls how user IDs are generated. The default `NullUserIdPolicy` returns `null`,
+which lets the database assign the ID via auto-increment.
+
+The built-in `createSchema()` creates an `INT AUTO_INCREMENT` primary key. If you use a string ID policy
+(e.g. UUID, ULID), you must provide your own schema with a compatible column type — for example
+`users.id CHAR(36)` and `sessions.user_id CHAR(36)`. `createSchema()` is a convenience default,
+not a requirement.
+
+### External users and nullable password_hash
+
+`password_hash` is `NULL` in the default schema. `PdoCredentialProvider` treats a `NULL` or empty hash
+as a disabled local login and returns a failure — this prevents accidental password bypass.
+
+`PdoUserStorage::createUser()` is intended for local password accounts and requires a non-empty password hash.
+External credential providers (Cognito, Keycloak, etc.) should manage user creation with their own logic,
+or insert directly with `password_hash = NULL` for users that only authenticate externally.
+
 ---
 
 ## Hooks
@@ -294,6 +336,22 @@ $auth->forceLogoutUser($userOrId);        // all sessions for a user
 $auth->forceLogoutEmail($email);          // all sessions by email
 $auth->forceLogoutToken($token);          // single session by token
 ```
+
+---
+
+## v2 breaking changes
+
+- `Auth::login()` now returns `AuthKit\Login`, not `?string`. Check `$login->isSuccess()`, `$login->isFailure()`, or `$login->requiresChallenge()`.
+- Login-time `$additionalChecks` parameter removed from `login()`. Use `LoginExtensionInterface` instead.
+- `UserStorageInterface::findByToken()` requires a second argument: `findByToken(string $token, \DateTimeImmutable $now)`.
+- `ChallengeStorageInterface::complete()` requires a second argument: `complete(ChallengeRecord $record, \DateTimeImmutable $now)`.
+- `ChallengeStorageInterface::purgeExpired()` requires `\DateTimeImmutable $now`.
+- `PdoUserStorage::purgeExpiredTokens()` requires `\DateTimeImmutable $now`.
+- `UserStorageInterface::storeToken()` accepts `?\DateTimeInterface` instead of `?\DateTime`.
+- `Auth` constructor: `$sessionKey` parameter removed — use `transport: new PhpSessionTransport('key')` instead.
+- `Auth::setSessionKey()` removed.
+- PHP `>=8.1` required (was `>=8.0`).
+- `ramsey/uuid` dependency removed — tokens are generated with `bin2hex(random_bytes(32))`.
 
 ---
 
