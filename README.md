@@ -449,7 +449,7 @@ $auth->forceLogoutToken($token);          // single session by token
 
 ## v2.1.0 breaking changes
 
-- `createSchema()` no longer creates an `active` column on the `users` table. The column is only meaningful when `ActiveUserExtension` (or a custom equivalent) is registered — declare it there via `additionalSchema()`. If you relied on the column being present without using the extension, add it yourself with `ALTER TABLE users ADD COLUMN IF NOT EXISTS active TINYINT NOT NULL DEFAULT 0`.
+- `createSchema()` no longer creates an `active` column on the `users` table.
 
 ---
 
