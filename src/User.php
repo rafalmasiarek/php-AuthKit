@@ -126,12 +126,14 @@ class User implements \JsonSerializable
     }
 
     /**
-     * Compatibility helpers.
+     * Returns the user's ID, or null if not yet persisted.
+     *
+     * @return int|string|null
      */
-    public function getId(): ?int
+    public function getId(): int|string|null
     {
         $id = $this->get('id');
-        return is_int($id) ? $id : null;
+        return (is_int($id) || is_string($id)) ? $id : null;
     }
 
     /**
