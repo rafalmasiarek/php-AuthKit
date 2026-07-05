@@ -13,11 +13,13 @@ use AuthKit\Credential\PdoCredentialProvider;
 use AuthKit\Exception\AuthException;
 use AuthKit\Extension\ChallengeExtensionInterface;
 use AuthKit\Extension\LoginExtensionInterface;
+use AuthKit\Extension\SchemaProviderInterface;
 use AuthKit\Hook\HookInterface;
 use AuthKit\Message\DefaultMessageProvider;
 use AuthKit\Message\MessageProviderInterface;
 use AuthKit\Password\NativePasswordHasher;
 use AuthKit\Password\PasswordHasherInterface;
+use AuthKit\Storage\SchemaMigrationInterface;
 use AuthKit\Storage\UserStorageInterface;
 use AuthKit\Transport\PhpSessionTransport;
 use AuthKit\Transport\TokenTransportInterface;
@@ -115,6 +117,45 @@ final class Auth
     public function addLoginExtension(LoginExtensionInterface $extension): void
     {
         $this->loginExtensions[] = $extension;
+    }
+
+    /**
+     * Bootstrap the database schema for the configured storage backend.
+     *
+     * Delegates to the storage layer if it implements SchemaMigrationInterface.
+     * Schema providers are collected from two sources:
+     *
+     *  1. Registered login extensions that implement SchemaProviderInterface
+     *     (e.g. SuspendedUserExtension, ActiveUserExtension).
+     *  2. Any additional providers passed explicitly — use this for components
+     *     that are not login extensions but own database tables (e.g. Mailer).
+     *
+     * Does nothing when the active storage does not support schema migration
+     * (e.g. an in-memory test stub).
+     *
+     * Typical bootstrap sequence:
+     *
+     *   $auth = new Auth(new PdoUserStorage($pdo, new UuidUserIdPolicy()), ...);
+     *   $auth->addLoginExtension(new SuspendedUserExtension());
+     *   $auth->addLoginExtension(new ActiveUserExtension());
+     *   $auth->createSchema($mailer); // extensions + Mailer mail_tracking table
+     *
+     * @param  SchemaProviderInterface ...$additionalProviders Components outside the
+     *         login extension pipeline that also need tables (e.g. Mailer).
+     * @return void
+     */
+    public function createSchema(SchemaProviderInterface ...$additionalProviders): void
+    {
+        if (!$this->storage instanceof SchemaMigrationInterface) {
+            return;
+        }
+
+        $fromExtensions = array_values(array_filter(
+            $this->loginExtensions,
+            static fn($ext) => $ext instanceof SchemaProviderInterface,
+        ));
+
+        $this->storage->createSchema(...$fromExtensions, ...$additionalProviders);
     }
 
     /**

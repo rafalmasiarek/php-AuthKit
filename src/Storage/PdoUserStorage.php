@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AuthKit\Storage;
 
+use AuthKit\Extension\SchemaProviderInterface;
 use AuthKit\User;
 use AuthKit\UserId\NullUserIdPolicy;
 use AuthKit\UserId\UserIdPolicyInterface;
@@ -12,9 +13,12 @@ use PDO;
 /**
  * PDO-backed user storage supporting MySQL/MariaDB and SQLite.
  *
+ * Implements SchemaMigrationInterface so that Auth::createSchema() can
+ * bootstrap the required tables and delegate to registered extension providers.
+ *
  * @package AuthKit\Storage
  */
-final class PdoUserStorage implements UserStorageInterface
+final class PdoUserStorage implements UserStorageInterface, SchemaMigrationInterface
 {
     /**
      * @param PDO                  $pdo          Database connection.
@@ -177,46 +181,63 @@ final class PdoUserStorage implements UserStorageInterface
     }
 
     /**
-     * @inheritDoc
+     * Create the core users/sessions tables and run any additional schema declared
+     * by the given providers.
+     *
+     * Column types for the primary key and foreign key columns are determined by
+     * the injected UserIdPolicyInterface so that the schema matches the chosen ID
+     * strategy (e.g. INT AUTO_INCREMENT for NullUserIdPolicy, CHAR(36) for UUID).
+     *
+     * The method is idempotent — safe to call multiple times.
+     *
+     * @param  SchemaProviderInterface ...$providers Extension providers whose
+     *         additionalSchema() statements are executed after the core tables.
+     * @return void
      */
-    public function createSchema(): void
+    public function createSchema(SchemaProviderInterface ...$providers): void
     {
-        $driver = $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        $driver  = $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        $idDef   = $this->userIdPolicy->idColumnDefinition($driver);
+        $fkType  = $this->userIdPolicy->userIdForeignType($driver);
+        $hasPkInline = str_contains(strtoupper($idDef), 'PRIMARY KEY');
 
         if ($driver === 'sqlite') {
             $this->pdo->exec('PRAGMA foreign_keys = ON;');
+            $pkClause = $hasPkInline ? '' : ', PRIMARY KEY (id)';
             $this->pdo->exec("
                 CREATE TABLE IF NOT EXISTS users (
-                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                    email         TEXT    NOT NULL UNIQUE,
+                    id            {$idDef},
+                    email         TEXT    NOT NULL,
                     password_hash TEXT    NULL,
-                    active        INTEGER NOT NULL DEFAULT 0
+                    active        INTEGER NOT NULL DEFAULT 0{$pkClause},
+                    UNIQUE (email)
                 )
             ");
             $this->pdo->exec("
                 CREATE TABLE IF NOT EXISTS sessions (
                     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id    INTEGER NOT NULL,
-                    token      TEXT    NOT NULL UNIQUE,
-                    expires_at TEXT    DEFAULT NULL,
+                    user_id    {$fkType},
+                    token      TEXT NOT NULL UNIQUE,
+                    expires_at TEXT DEFAULT NULL,
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 )
             ");
         } else {
+            $pkClause = $hasPkInline ? '' : 'PRIMARY KEY (id),';
             $this->pdo->exec("
                 CREATE TABLE IF NOT EXISTS users (
-                    id            INT          NOT NULL AUTO_INCREMENT,
+                    id            {$idDef},
                     email         VARCHAR(255) NOT NULL,
                     password_hash VARCHAR(255) NULL,
                     active        TINYINT      NOT NULL DEFAULT 0,
-                    PRIMARY KEY (id),
+                    {$pkClause}
                     UNIQUE KEY uq_email (email)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             ");
             $this->pdo->exec("
                 CREATE TABLE IF NOT EXISTS sessions (
                     id         INT          NOT NULL AUTO_INCREMENT,
-                    user_id    INT          NOT NULL,
+                    user_id    {$fkType},
                     token      VARCHAR(255) NOT NULL,
                     expires_at DATETIME     DEFAULT NULL,
                     PRIMARY KEY (id),
@@ -225,6 +246,12 @@ final class PdoUserStorage implements UserStorageInterface
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             ");
+        }
+
+        foreach ($providers as $provider) {
+            foreach ($provider->additionalSchema($driver) as $sql) {
+                $this->pdo->exec($sql);
+            }
         }
     }
 }
