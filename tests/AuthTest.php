@@ -48,7 +48,7 @@ class AuthTest extends TestCase
      */
     public function testRegisterAndLogin(): void
     {
-        $user = $this->auth->register('test@example.com', 'Password123!', ['active' => 1]);
+        $user = $this->auth->register('test@example.com', 'Password123!');
         $this->assertInstanceOf(User::class, $user);
 
         $login = $this->auth->login('test@example.com', 'Password123!');

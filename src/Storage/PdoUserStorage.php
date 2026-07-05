@@ -207,9 +207,8 @@ final class PdoUserStorage implements UserStorageInterface, SchemaMigrationInter
             $this->pdo->exec("
                 CREATE TABLE IF NOT EXISTS users (
                     id            {$idDef},
-                    email         TEXT    NOT NULL,
-                    password_hash TEXT    NULL,
-                    active        INTEGER NOT NULL DEFAULT 0{$pkClause},
+                    email         TEXT NOT NULL,
+                    password_hash TEXT NULL{$pkClause},
                     UNIQUE (email)
                 )
             ");
@@ -229,7 +228,6 @@ final class PdoUserStorage implements UserStorageInterface, SchemaMigrationInter
                     id            {$idDef},
                     email         VARCHAR(255) NOT NULL,
                     password_hash VARCHAR(255) NULL,
-                    active        TINYINT      NOT NULL DEFAULT 0,
                     {$pkClause}
                     UNIQUE KEY uq_email (email)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

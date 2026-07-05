@@ -10,6 +10,7 @@ Lightweight, extensible PHP 8.1+ authentication library.
 - Pluggable **password hasher** — `NativePasswordHasher` default
 - Pluggable **token transport** — PHP session (web) or Bearer header (API)
 - Pluggable **user ID policy** — auto-increment default, UUID in your app
+- Lean core schema — `users` table contains only `id`, `email`, `password_hash`; extra columns (e.g. `active`, `suspended_at`) declared by the extensions that need them
 - Optional **hooks** for audit and policy (rate-limit, IP checks, logging)
 - Admin features: force logout by user / token / email
 
@@ -443,6 +444,12 @@ $auth->forceLogoutUser($userOrId);        // all sessions for a user
 $auth->forceLogoutEmail($email);          // all sessions by email
 $auth->forceLogoutToken($token);          // single session by token
 ```
+
+---
+
+## v2.1.0 breaking changes
+
+- `createSchema()` no longer creates an `active` column on the `users` table. The column is only meaningful when `ActiveUserExtension` (or a custom equivalent) is registered — declare it there via `additionalSchema()`. If you relied on the column being present without using the extension, add it yourself with `ALTER TABLE users ADD COLUMN IF NOT EXISTS active TINYINT NOT NULL DEFAULT 0`.
 
 ---
 
