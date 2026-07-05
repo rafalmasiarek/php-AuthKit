@@ -1,164 +1,103 @@
 <?php
 
+declare(strict_types=1);
+
 namespace AuthKit\Storage;
 
-use PDO;
-use DateTime;
 use AuthKit\User;
-use AuthKit\Storage\UserStorageInterface;
+use AuthKit\UserId\NullUserIdPolicy;
+use AuthKit\UserId\UserIdPolicyInterface;
+use DateTime;
+use PDO;
 
-class PdoUserStorage implements UserStorageInterface
+/**
+ * PDO-backed user storage supporting MySQL/MariaDB and SQLite.
+ *
+ * @package AuthKit\Storage
+ */
+final class PdoUserStorage implements UserStorageInterface
 {
-    private PDO $pdo;
-
-
     /**
-     * PdoUserStorage constructor.
-     *
-     * @param PDO $pdo PDO instance connected to the database.
+     * @param PDO                  $pdo          Database connection.
+     * @param UserIdPolicyInterface $userIdPolicy ID generation policy (default: database auto-increment).
      */
-    public function __construct(PDO $pdo)
-    {
-        $this->pdo = $pdo;
+    public function __construct(
+        private readonly PDO                  $pdo,
+        private readonly UserIdPolicyInterface $userIdPolicy = new NullUserIdPolicy(),
+    ) {
     }
 
     /**
-     * Find a user by their email address.
-     *
-     * @param string $email The email address to search for.
-     * @return User|null Returns a User object if found, or null if not found.
+     * @inheritDoc
      */
     public function findByEmail(string $email): ?User
     {
-        $stmt = $this->pdo->prepare("SELECT * FROM users WHERE email = :email LIMIT 1");
+        $stmt = $this->pdo->prepare('SELECT * FROM users WHERE email = :email LIMIT 1');
         $stmt->execute(['email' => $email]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if (!$row) return null;
-
-        return new User($row);
+        return $row ? new User($row) : null;
     }
 
     /**
-     * Find a user by their session token.
-     *
-     * @param string $token The session token to search for.
-     * @return User|null Returns a User object if found, or null if not found.
+     * @inheritDoc
      */
     public function findByToken(string $token): ?User
     {
-        $stmt = $this->pdo->prepare("
+        $stmt = $this->pdo->prepare('
             SELECT u.* FROM users u
             JOIN sessions s ON s.user_id = u.id
-            WHERE s.token = :token AND s.expires_at > NOW()
+            WHERE s.token = :token
+              AND (s.expires_at IS NULL OR s.expires_at > :now)
             LIMIT 1
-        ");
-        $stmt->execute(['token' => $token]);
+        ');
+        $stmt->execute([
+            'token' => $token,
+            'now'   => (new DateTime())->format('Y-m-d H:i:s'),
+        ]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if (!$row) return null;
-
-        return new User($row);
+        return $row ? new User($row) : null;
     }
 
     /**
-     * Find a user by their ID.
-     *
-     * @param int $id The user ID to search for.
-     * @return User|null Returns a User object if found, or null if not found.
+     * @inheritDoc
      */
-    public function findById($id): ?User
+    public function findById(int|string $id): ?User
     {
-        $stmt = $this->pdo->prepare("SELECT * FROM users WHERE id = :id LIMIT 1");
+        $stmt = $this->pdo->prepare('SELECT * FROM users WHERE id = :id LIMIT 1');
         $stmt->execute(['id' => $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if (!$row) return null;
-
-        return new User($row);
+        return $row ? new User($row) : null;
     }
 
     /**
-     * Create a new user in the database.
-     *
-     * @param string $email The email address of the user.
-     * @param string $passwordHash The hashed password of the user.
-     * @param array $fields Additional fields to store in the user record.
-     * @return User Returns the created User object.
+     * @inheritDoc
      */
     public function createUser(string $email, string $passwordHash, array $fields = []): User
     {
-        $allFields = array_merge([
-            'email' => $email,
-            'password_hash' => $passwordHash,
-        ], $fields);
+        $generatedId = $this->userIdPolicy->generate();
 
-        $columns = implode(', ', array_map(fn($key) => "`$key`", array_keys($allFields)));
-        $placeholders = implode(', ', array_map(fn($key) => ":$key", array_keys($allFields)));
+        $allFields = array_merge(
+            $generatedId !== null ? ['id' => $generatedId] : [],
+            ['email' => $email, 'password_hash' => $passwordHash],
+            $fields,
+        );
+
+        $columns      = implode(', ', array_map(fn($k) => "`$k`", array_keys($allFields)));
+        $placeholders = implode(', ', array_map(fn($k) => ":$k", array_keys($allFields)));
 
         $stmt = $this->pdo->prepare("INSERT INTO users ($columns) VALUES ($placeholders)");
         $stmt->execute($allFields);
 
-        $id = (int) $this->pdo->lastInsertId();
-        $allFields['id'] = $id;
+        $allFields['id'] = $generatedId ?? $this->pdo->lastInsertId();
 
         return new User($allFields);
     }
 
     /**
-     * Store a session token for a user.
-     *
-     * @param User $user The user to associate the token with.
-     * @param string $token The session token to store.
-     * @param DateTime|null $expiresAt Optional expiration date for the token.
-     */
-    public function storeToken(User $user, string $token, ?\DateTime $expiresAt): void
-    {
-        $stmt = $this->pdo->prepare("INSERT INTO sessions (user_id, token, expires_at) VALUES (:uid, :token, :exp)");
-        $stmt->execute([
-            'uid' => $user->getId(),
-            'token' => $token,
-            'exp' => $expiresAt ? $expiresAt->format('Y-m-d H:i:s') : null,
-        ]);
-    }
-
-    /**
-     * Delete a session token from the database.
-     *
-     * @param string $token The session token to delete.
-     * @return int The number of tokens that were deleted (mostly 0/1).
-     */
-    public function deleteToken(string $token): int
-    {
-        $stmt = $this->pdo->prepare("DELETE FROM sessions WHERE token = :token");
-        $stmt->execute(['token' => $token]);
-        return $stmt->rowCount();
-    }
-
-    /**
-     * Delete all session tokens belonging to a specific user.
-     *
-     * This method invalidates all active sessions for the given user ID by
-     * removing corresponding records from the `sessions` table.
-     * Typically used for administrative or security actions (e.g. force logout).
-     *
-     * @param int $userId The ID of the user whose sessions should be deleted.
-     *
-     * @return int The number of sessions that were removed.
-     */
-    public function deleteTokensByUserId(int $userId): int
-    {
-        $stmt = $this->pdo->prepare("DELETE FROM sessions WHERE user_id = :uid");
-        $stmt->execute(['uid' => $userId]);
-        return $stmt->rowCount();
-    }
-
-    /**
-     * Update a user's information in the database.
-     *
-     * @param User $user The user to update.
-     * @param array $fields Associative array of fields to update.
-     * @return User Returns the updated User object.
+     * @inheritDoc
      */
     public function updateUser(User $user, array $fields): User
     {
@@ -167,69 +106,121 @@ class PdoUserStorage implements UserStorageInterface
         }
 
         $updates = [];
-        $params = [];
+        $params  = [];
 
         foreach ($fields as $key => $value) {
-            $updates[] = "`$key` = :$key";
+            $updates[]       = "`$key` = :$key";
             $params[":$key"] = $value;
         }
 
-        $params[":id"] = $user->getId();
-        $sql = "UPDATE users SET " . implode(", ", $updates) . " WHERE id = :id";
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
+        $params[':id'] = $user->getId();
 
-        return $this->findByEmail($fields['email'] ?? $user->getEmail());
+        $this->pdo->prepare('UPDATE users SET ' . implode(', ', $updates) . ' WHERE id = :id')
+            ->execute($params);
+
+        $id = $user->getId();
+
+        return $id !== null ? ($this->findById($id) ?? $user) : $user;
     }
 
     /**
-     * Purge expired session tokens from the database.
+     * @inheritDoc
      */
-    public function purgeExpiredTokens(): void
+    public function storeToken(User $user, string $token, ?\DateTime $expiresAt): void
     {
-        $this->pdo->prepare("
-        DELETE FROM sessions 
-        WHERE expires_at IS NOT NULL AND expires_at < :now
-    ")->execute([
-            'now' => (new \DateTime())->format('Y-m-d H:i:s'),
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO sessions (user_id, token, expires_at) VALUES (:uid, :token, :exp)'
+        );
+        $stmt->execute([
+            'uid'   => $user->getId(),
+            'token' => $token,
+            'exp'   => $expiresAt?->format('Y-m-d H:i:s'),
         ]);
     }
 
     /**
-     * Create the necessary database schema for user and session management.
+     * @inheritDoc
+     */
+    public function deleteToken(string $token): int
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM sessions WHERE token = :token');
+        $stmt->execute(['token' => $token]);
+
+        return $stmt->rowCount();
+    }
+
+    /**
+     * @inheritDoc
+     */
+    public function deleteTokensByUserId(int|string $userId): int
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM sessions WHERE user_id = :uid');
+        $stmt->execute(['uid' => $userId]);
+
+        return $stmt->rowCount();
+    }
+
+    /**
+     * Delete all expired session tokens.
      *
-     * This method creates the `users` and `sessions` tables if they do not already exist.
-     * It also sets up foreign key constraints and enables foreign key support for SQLite.
+     * @return void
+     */
+    public function purgeExpiredTokens(): void
+    {
+        $this->pdo->prepare(
+            'DELETE FROM sessions WHERE expires_at IS NOT NULL AND expires_at < :now'
+        )->execute(['now' => (new DateTime())->format('Y-m-d H:i:s')]);
+    }
+
+    /**
+     * @inheritDoc
      */
     public function createSchema(): void
     {
         $driver = $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
 
-        $types = $driver === 'mysql'
-            ? ['id' => 'INT AUTO_INCREMENT PRIMARY KEY', 'text' => 'VARCHAR(255)', 'datetime' => 'DATETIME']
-            : ['id' => 'INTEGER PRIMARY KEY AUTOINCREMENT', 'text' => 'TEXT', 'datetime' => 'TEXT'];
-
         if ($driver === 'sqlite') {
-            $this->pdo->exec("PRAGMA foreign_keys = ON;");
+            $this->pdo->exec('PRAGMA foreign_keys = ON;');
+            $this->pdo->exec("
+                CREATE TABLE IF NOT EXISTS users (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    email         TEXT    NOT NULL UNIQUE,
+                    password_hash TEXT    NOT NULL,
+                    active        INTEGER NOT NULL DEFAULT 0
+                )
+            ");
+            $this->pdo->exec("
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id    INTEGER NOT NULL,
+                    token      TEXT    NOT NULL UNIQUE,
+                    expires_at TEXT    DEFAULT NULL,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+            ");
+        } else {
+            $this->pdo->exec("
+                CREATE TABLE IF NOT EXISTS users (
+                    id            INT          NOT NULL AUTO_INCREMENT,
+                    email         VARCHAR(255) NOT NULL,
+                    password_hash VARCHAR(255) NOT NULL,
+                    active        TINYINT      NOT NULL DEFAULT 0,
+                    PRIMARY KEY (id),
+                    UNIQUE KEY uq_email (email)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            ");
+            $this->pdo->exec("
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id         INT          NOT NULL AUTO_INCREMENT,
+                    user_id    INT          NOT NULL,
+                    token      VARCHAR(255) NOT NULL,
+                    expires_at DATETIME     DEFAULT NULL,
+                    PRIMARY KEY (id),
+                    UNIQUE KEY uq_token (token),
+                    INDEX      idx_user_id (user_id),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            ");
         }
-
-        $this->pdo->exec("
-		    CREATE TABLE IF NOT EXISTS users (
-		        id {$types['id']},
-		        email {$types['text']} NOT NULL UNIQUE,
-		        password_hash {$types['text']} NOT NULL,
-		        active INTEGER DEFAULT 0
-		    );
-		");
-
-        $this->pdo->exec("
-		    CREATE TABLE IF NOT EXISTS sessions (
-		        id {$types['id']},
-		        user_id INTEGER NOT NULL,
-		        token {$types['text']} NOT NULL UNIQUE,
-		        expires_at {$types['datetime']},
-		        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-		    );
-		");
     }
 }

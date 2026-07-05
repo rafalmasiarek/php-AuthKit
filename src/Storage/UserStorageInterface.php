@@ -1,80 +1,91 @@
 <?php
 
+declare(strict_types=1);
+
 namespace AuthKit\Storage;
 
 use AuthKit\User;
 
-
+/**
+ * Persists and retrieves user records and session tokens.
+ *
+ * @package AuthKit\Storage
+ */
 interface UserStorageInterface
 {
     /**
      * Find a user by their email address.
      *
-     * @param string $email The email address to search for.
-     * @return User|null Returns a User object if found, or null if not found.
+     * @param  string $email The email address to search for.
+     * @return User|null
      */
     public function findByEmail(string $email): ?User;
 
     /**
      * Find a user by their session token.
      *
-     * @param string $token The session token to search for.
-     * @return User|null Returns a User object if found, or null if not found.
+     * @param  string $token The session token to search for.
+     * @return User|null
      */
     public function findByToken(string $token): ?User;
 
     /**
      * Find a user by their ID.
      *
-     * @param int $id The user ID to search for.
-     * @return User|null Returns a User object if found, or null if not found.
+     * @param  int|string $id The user ID to search for.
+     * @return User|null
+     */
+    public function findById(int|string $id): ?User;
+
+    /**
+     * Create and persist a new user.
+     *
+     * @param  string               $email        User's email address.
+     * @param  string               $passwordHash Hashed password.
+     * @param  array<string, mixed> $fields       Additional fields to store.
+     * @return User
      */
     public function createUser(string $email, string $passwordHash, array $fields = []): User;
 
     /**
-     * Update an existing user.
+     * Update fields on an existing user.
      *
-     * @param User $user The user object to update.
-     * @param array $fields Associative array of fields to update.
-     * @return User Returns the updated User object.
+     * @param  User                 $user   The user to update.
+     * @param  array<string, mixed> $fields Associative array of fields to update.
+     * @return User Updated user.
      */
     public function updateUser(User $user, array $fields): User;
 
     /**
      * Store a session token for a user.
      *
-     * @param User $user The user object.
-     * @param string $token The session token to store.
-     * @param \DateTime|null $expiresAt Optional expiration date/time for the token.
+     * @param  User           $user      The user to associate the token with.
+     * @param  string         $token     The session token to store.
+     * @param  \DateTime|null $expiresAt Optional expiration date/time.
+     * @return void
      */
     public function storeToken(User $user, string $token, ?\DateTime $expiresAt): void;
 
     /**
-     * Delete a session token.
+     * Delete a single session token.
      *
-     * @param string $token The session token to delete.
-     * @return int The number of tokens that were deleted (mostly 0/1).
+     * @param  string $token The session token to delete.
+     * @return int Number of tokens deleted (0 or 1).
      */
     public function deleteToken(string $token): int;
 
     /**
-     * Delete all session tokens for given user id.
-     * @return int number of removed tokens.
+     * Delete all session tokens for a given user.
+     *
+     * @param  int|string $userId The user ID whose tokens should be removed.
+     * @return int Number of tokens deleted.
      */
-    public function deleteTokensByUserId(int $userId): int;
+    public function deleteTokensByUserId(int|string $userId): int;
 
     /**
      * Create the necessary database schema for user storage.
      *
-     * This method should be called to initialize the storage system.
+     * @return void
      */
     public function createSchema(): void;
-
-    /**
-     * Find a user by their ID.
-     *
-     * @param int $id The user ID to search for.
-     * @return User|null Returns a User object if found, or null if not found.
-     */
-    public function findById($id): ?User;
 }
