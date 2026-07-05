@@ -17,6 +17,8 @@ use AuthKit\Message\MessageProviderInterface;
 use AuthKit\Password\NativePasswordHasher;
 use AuthKit\Password\PasswordHasherInterface;
 use AuthKit\Storage\UserStorageInterface;
+use AuthKit\Transport\PhpSessionTransport;
+use AuthKit\Transport\TokenTransportInterface;
 use DateInterval;
 use DateTime;
 
@@ -30,11 +32,6 @@ use DateTime;
  */
 final class Auth
 {
-    /**
-     * @var string Session key used to store the active token.
-     */
-    private string $sessionKey = 'auth_token';
-
     /**
      * @var bool Whether AuthException is thrown on errors instead of returning a message.
      */
@@ -56,6 +53,11 @@ final class Auth
     private CredentialProviderInterface $credentials;
 
     /**
+     * @var TokenTransportInterface Handles reading and writing the active token.
+     */
+    private TokenTransportInterface $transport;
+
+    /**
      * @var array<LoginExtensionInterface> Evaluated in order after credentials pass.
      */
     private array $loginExtensions = [];
@@ -69,6 +71,7 @@ final class Auth
      * @param PasswordHasherInterface|null     $hasher           Hasher for register() (default: NativePasswordHasher).
      * @param CredentialProviderInterface|null $credentials      Credential verifier for login() (default: PdoCredentialProvider).
      * @param ChallengeStorageInterface|null   $challengeStorage Required only when using challenge extensions.
+     * @param TokenTransportInterface|null     $transport        Token read/write transport (default: PhpSessionTransport).
      */
     public function __construct(
         private readonly UserStorageInterface       $storage,
@@ -79,15 +82,14 @@ final class Auth
         ?PasswordHasherInterface                    $hasher           = null,
         ?CredentialProviderInterface                $credentials      = null,
         private readonly ?ChallengeStorageInterface $challengeStorage = null,
+        ?TokenTransportInterface                    $transport        = null,
     ) {
         $this->messages        = $messages ?? new DefaultMessageProvider();
         $this->throwExceptions = $throwExceptions;
         $this->hasher          = $hasher ?? new NativePasswordHasher();
         $this->credentials     = $credentials ?? new PdoCredentialProvider($storage, $this->hasher);
-
-        if (session_status() === PHP_SESSION_NONE) {
-            session_start();
-        }
+        $this->transport       = $transport ?? new PhpSessionTransport();
+        $this->transport->initialize();
     }
 
     /**
@@ -113,17 +115,6 @@ final class Auth
     public function setThrowExceptions(bool $value): void
     {
         $this->throwExceptions = $value;
-    }
-
-    /**
-     * Set the session key used to store the active token.
-     *
-     * @param  string $key
-     * @return void
-     */
-    public function setSessionKey(string $key): void
-    {
-        $this->sessionKey = $key;
     }
 
     /**
@@ -287,14 +278,16 @@ final class Auth
      */
     public function getUser(): ?User
     {
-        if (empty($_SESSION[$this->sessionKey])) {
+        $token = $this->transport->get();
+
+        if ($token === null) {
             return null;
         }
 
-        $user = $this->storage->findByToken((string) $_SESSION[$this->sessionKey]);
+        $user = $this->storage->findByToken($token);
 
         if ($user === null) {
-            unset($_SESSION[$this->sessionKey]);
+            $this->transport->clear();
             $this->callHook('onLogoutExpired');
             return null;
         }
@@ -317,11 +310,12 @@ final class Auth
             $this->callHook('onLogout', $user);
         }
 
-        if (!empty($_SESSION[$this->sessionKey])) {
-            $this->storage->deleteToken($_SESSION[$this->sessionKey]);
+        $token = $this->transport->get();
+        if ($token !== null) {
+            $this->storage->deleteToken($token);
         }
 
-        unset($_SESSION[$this->sessionKey]);
+        $this->transport->clear();
     }
 
     /**
@@ -339,7 +333,7 @@ final class Auth
         $current = $this->getUser();
         if ($current !== null && $current->getId() === $userId) {
             $this->callHook('onLogout', $current);
-            unset($_SESSION[$this->sessionKey]);
+            $this->transport->clear();
         }
 
         $this->callHook('onLogoutForced', $userId, $reason, $count);
@@ -359,11 +353,12 @@ final class Auth
         $user    = $this->storage->findByToken($token);
         $removed = $this->storage->deleteToken($token);
 
-        if (!empty($_SESSION[$this->sessionKey]) && hash_equals($_SESSION[$this->sessionKey], $token)) {
+        $current = $this->transport->get();
+        if ($current !== null && hash_equals($current, $token)) {
             if ($user !== null) {
                 $this->callHook('onLogout', $user);
             }
-            unset($_SESSION[$this->sessionKey]);
+            $this->transport->clear();
         }
 
         if ($user !== null) {
@@ -422,7 +417,7 @@ final class Auth
         $this->storage->storeToken($user, $token, $expiresAt);
         $this->callHook('onLoginSuccess', $user);
 
-        $_SESSION[$this->sessionKey] = $token;
+        $this->transport->set($token);
 
         return Login::success($token, $user);
     }
