@@ -248,7 +248,19 @@ final class PdoUserStorage implements UserStorageInterface, SchemaMigrationInter
 
         foreach ($providers as $provider) {
             foreach ($provider->additionalSchema($driver) as $sql) {
-                $this->pdo->exec($sql);
+                try {
+                    $this->pdo->exec($sql);
+                } catch (\PDOException $e) {
+                    $msg  = strtolower($e->getMessage());
+                    $code = (int) $e->getCode();
+                    $isDuplicate = $code === 1060
+                        || $code === 1050
+                        || str_contains($msg, 'duplicate column name')
+                        || str_contains($msg, 'already exists');
+                    if (!$isDuplicate) {
+                        throw $e;
+                    }
+                }
             }
         }
     }
