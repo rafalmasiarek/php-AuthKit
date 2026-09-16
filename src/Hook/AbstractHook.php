@@ -56,6 +56,11 @@ abstract class AbstractHook implements HookInterface
     /**
      * @inheritDoc
      */
+    public function onLogoutForced(int $userId, ?string $reason, int $count): void {}
+
+    /**
+     * @inheritDoc
+     */
     public function onUpdate(User $user): void {}
 
     /**
