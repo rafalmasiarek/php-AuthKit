@@ -20,7 +20,7 @@ context:
 
     > Works with MySQL/MariaDB and SQLite. Designed for Slim, Laminas, Symfony or plain PHP.
 
-includes:
+footer_includes:
   - docs/usage.md
   - docs/advanced.md
   - docs/migration.md
