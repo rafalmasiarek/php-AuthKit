@@ -1,4 +1,12 @@
 # php-AuthKit
+
+
+
+
+
+
+
+
 Lightweight, extensible PHP 8.1+ authentication library.
 
 - Registration & login with secure password hashing
@@ -14,6 +22,39 @@ Lightweight, extensible PHP 8.1+ authentication library.
 - Admin features: force logout by user / token / email
 
 > Works with MySQL/MariaDB and SQLite. Designed for Slim, Laminas, Symfony or plain PHP.
+
+
+
+
+
+
+
+## License
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+```text
+The MIT License (MIT)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files, to deal in the Software
+without restriction.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+
+Source: https://opensource.org/licenses/MIT
+```
+
+
+See [LICENSE](LICENSE) for full details.
+
+
+## Authors
+
+- Rafał Masiarek | [website](https://masiarek.pl) | [email](mailto:rafal@masiarek.pl) | [github](https://github.com/rafalmasiarek)
 
 
 
@@ -4352,31 +4393,6 @@ SQL type for foreign key columns that reference users.id. Used by createSchema()
 </details>
 
 
-
-## License
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-```text
-The MIT License (MIT)
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files, to deal in the Software
-without restriction.
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
-
-Source: https://opensource.org/licenses/MIT
-```
-
-
-See [LICENSE](LICENSE) for full details.
-## Authors
-
-- Rafał Masiarek | [website](https://masiarek.pl) | [email](mailto:rafal@masiarek.pl) | [github](https://github.com/rafalmasiarek)
 
 
 <!-- references -->
