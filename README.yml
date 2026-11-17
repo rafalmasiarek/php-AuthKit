@@ -1,0 +1,33 @@
+name: php-AuthKit
+repo_url: https://github.com/rafalmasiarek/php-AuthKit
+license: MIT
+
+context:
+  - |
+    Lightweight, extensible PHP 8.1+ authentication library.
+
+    - Registration & login with secure password hashing
+    - Server-side session tokens stored in DB with optional TTL
+    - Pluggable **login extension pipeline** — deny or challenge after credentials pass
+    - Multi-step **challenge flows** (MFA, email activation, device check, etc.)
+    - Pluggable **credential provider** — local PDO default, Cognito/Keycloak as external packages
+    - Pluggable **password hasher** — `NativePasswordHasher` default
+    - Pluggable **token transport** — PHP session (web) or Bearer header (API)
+    - Pluggable **user ID policy** — auto-increment default, UUID in your app
+    - Lean core schema — `users` table contains only `id`, `email`, `password_hash`; extra columns (e.g. `active`, `suspended_at`) declared by the extensions that need them
+    - Optional **hooks** for audit and policy (rate-limit, IP checks, logging)
+    - Admin features: force logout by user / token / email
+
+    > Works with MySQL/MariaDB and SQLite. Designed for Slim, Laminas, Symfony or plain PHP.
+
+includes:
+  - docs/usage.md
+  - docs/advanced.md
+  - docs/migration.md
+  - docs/api.md
+
+authors:
+  - name: Rafał Masiarek
+    email: rafal@masiarek.pl
+    github: rafalmasiarek
+    website: https://masiarek.pl
